@@ -4,8 +4,13 @@ from network.runge_kutta import rungeKutta
 
 
 class DynamicsFunc:
-    def updateOperators(self):
-        pass
+
+    def __init__(self):
+        self.operators = []
+
+    def updateOperators(self, config, dims):
+        for operator in self.operators:
+            operator.transform(config, dims)
 
 
 class AnalyticDynamicsFunc(DynamicsFunc):
@@ -22,13 +27,12 @@ class EnergyExchangeDynamics(DerivativeDynamicsFunc):
         super().__init__()
         self.system1 = system1
         self.system2 = system2
+        self.systems = [self.system1, self.system2]
         self.coupling_strength = coupling_strength
-        self.updateOperators()
-        
-    def updateOperators(self):
         self.sigma_x_12 = self.system1.generateParentOperator(sigmaX) * self.system2.generateParentOperator(sigmaX)
         self.sigma_y_12 = self.system1.generateParentOperator(sigmaY) * self.system2.generateParentOperator(sigmaY)
         self.hamiltonian = self.coupling_strength * (self.sigma_x_12 + self.sigma_y_12)
+        self.operators = [self.hamiltonian]
 
     def calcDerivative(self, init_state: DensityMatrix) -> DensityMatrix:
         ro_dot = -1j * self.hamiltonian.commutator(init_state)
@@ -36,13 +40,14 @@ class EnergyExchangeDynamics(DerivativeDynamicsFunc):
     
 class DampingDynamics(DerivativeDynamicsFunc):
     def __init__(self, system: QuantumSystem, damping_strength: float):
-        self.system = system
+        self.systems = [system]
         self.damping_strength = damping_strength
+        self.sigma_minus = self.system.generateParentOperator(sigmaMinus)
+        self.sigma_plus = self.system.generateParentOperator(sigmaPlus)
         self.updateOperators()
 
     def updateOperators(self):
-        self.sigma_minus = self.system.generateParentOperator(sigmaMinus)
-        self.sigma_plus = self.system.generateParentOperator(sigmaPlus)
+
         
     def calcDerivative(self, init_state: DensityMatrix):
         ro_dot = (self.damping_strength / 2) * (
@@ -50,27 +55,6 @@ class DampingDynamics(DerivativeDynamicsFunc):
             - init_state * self.sigma_plus * self.sigma_minus
             - self.sigma_plus * self.sigma_minus * init_state
         )
-        return ro_dot
-
-
-class PumpingDynamics(DerivativeDynamicsFunc):
-    def __init__(self, system1: QuantumSystem, system2: QuantumSystem, gamma_1: float, gamma_2: float):
-        self.system1 = system1
-        self.system2 = system2
-        self.gamma_1 = gamma_1
-        self.gamma_2 = gamma_2
-        self.updateOperators()
-
-    def updateOperators(self):
-        self.sigma_plus_1 = self.system1.generateParentOperator(sigmaPlus)
-        self.sigma_plus_2 = self.system2.generateParentOperator(sigmaPlus)
-        self.sigma_minus_1 = self.system1.generateParentOperator(sigmaMinus)
-        self.sigma_minus_2 = self.system2.generateParentOperator(sigmaMinus)
-
-    def calc(self, init_state: DensityMatrix):
-        term1 = - ((self.gamma_1 * self.gamma_2) ** 0.5) * self.sigma_plus_2.commutator(self.sigma_minus_1 * init_state)
-        term2 = - ((self.gamma_1 * self.gamma_2) ** 0.5) * (init_state * self.sigma_plus_1).commutator(self.sigma_minus_2)
-        ro_dot = term1 + term2
         return ro_dot
 
 class QuantumSystemDynamics:
