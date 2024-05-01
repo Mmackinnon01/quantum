@@ -2,6 +2,7 @@ import numpy as np
 import scipy
 import math
 import itertools
+import typing
 
 from quantum.unitary import randomUnitary
 
