@@ -49,7 +49,7 @@ class Matrix:
 
     @property
     def matrix(self):
-        if self.transformed_matrix:
+        if self.transformed_matrix is not None:
             return self.transformed_matrix
         else:
             return self.__matrix
@@ -126,7 +126,7 @@ class Matrix:
         return new_list
 
     def rewrite_matrix(self, matrix, config, dims):
-        new_matrix = np.zeros(matrix.shape)
+        new_matrix = np.zeros(matrix.shape).astype("complex")
         new_dims = self.reorder_list(dims, config)
         for i in range(matrix.shape[0]):
             for j in range(matrix.shape[1]):
@@ -139,12 +139,12 @@ class Matrix:
                 new_matrix[new_i][new_j] = matrix[i][j]
         return new_matrix
 
-    def tranform(self, config, dims):
+    def transform(self, config, dims):
         num_old = len([val for val in config if val != -1])
-
+        matrix = self.__matrix
         for i, state in enumerate(config):
             if state == -1:
-                matrix = self.extend_matrix(self.matrix, [dims[i]])
+                matrix = self.extend_matrix(matrix, [dims[i]])
                 config[i] = i + num_old
             else:
                 num_old -= 1
@@ -347,11 +347,11 @@ class DensityMatrix(Matrix):
             basis_vector = Operator(basis_vector)
             if trace_system > 0:
                 basis_vector = Operator(
-                    np.eye(math.prod(configuration[: trace_system - 1]))
+                    np.eye(math.prod(configuration[:trace_system]))
                 ).tensor(basis_vector)
             if trace_system < len(configuration) - 1:
                 basis_vector = basis_vector.tensor(
-                    Operator(np.eye(math.prod(configuration[trace_system:])))
+                    Operator(np.eye(math.prod(configuration[trace_system+1:])))
                 )
 
             basis.append(basis_vector.hermConj())
@@ -545,6 +545,17 @@ class GeneralQubitMatrixGen:
             + c3 * sigmaZ.tensor(sigmaZ)
         )
         return state / 4
+    
+    def generateThermalState(self, T, dim=2, alpha=1, k_b=1):
+        beta = 1/(T*k_b)
+
+        mat = np.zeros(shape=(dim,dim)).astype("complex")
+        norm_fac = 0
+        for i in range(dim):
+            mat[i][i] = math.exp(-beta*alpha*(1 - (2*i)/(dim-1)))
+            norm_fac += mat[i][i]
+
+        return DensityMatrix(mat/norm_fac)
 
 
 class QuantumChannelGenerator:
@@ -578,5 +589,9 @@ class QuantumChannelGenerator:
 sigmaX = Operator(np.array([[0, 1], [1, 0]]))
 sigmaY = Operator(np.array([[0, -1j], [1j, 0]]))
 sigmaZ = Operator(np.array([[1, 0], [0, -1]]))
+lambda1 = Operator(np.array([[0, 1, 0], [1, 0, 0], [0, 0, 0]]))
+lambda2 = Operator(np.array([[0, -1j, 0], [1j, 0, 0], [0, 0, 0]]))
+lambda6 = Operator(np.array([[0, 0, 0], [0, 0, 1], [0, 1, 0]]))
+lambda7 = Operator(np.array([[0, 0, 0], [0, 0, -1j], [0, 1j, 0]]))
 sigmaPlus = Operator(np.array([[0, 1], [0, 0]]))
 sigmaMinus = Operator(np.array([[0, 0], [1, 0]]))
