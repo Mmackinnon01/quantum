@@ -1,5 +1,8 @@
-from quantum.core import DensityMatrix
+from quantum.core import DensityMatrix, Operator
 from quantum_model.runge_kutta import rungeKutta
+
+import numpy as np
+import scipy
 
 
 class DynamicsManager:
@@ -17,6 +20,23 @@ class DynamicsManager:
         pass
 
 
+class AnalyticDynamicsManager(DynamicsManager):
+
+    def u(self, time):
+        H = 0
+        for dynamic in self.dynamic_funcs:
+            H += dynamic.hamiltonian
+        u_t = Operator(scipy.linalg.expm(-1j*H.matrix*time))
+        return u_t
+
+    def precompute_u(self, time):
+        self.u_t = self.u(time)
+        self.u_t_dagger = self.u_t.hermConj()
+
+    def evolve(self, state: DensityMatrix):
+        return self.u_t * state * self.u_t_dagger
+
+
 class NumericalDynamicsManager(DynamicsManager):
     def evolve(self, state: DensityMatrix, time: float):
         total_time = 0
@@ -31,3 +51,20 @@ class NumericalDynamicsManager(DynamicsManager):
             derivative += func.calcDerivative(state)
 
         return derivative
+    
+class ReducedNumericalDynamicsManager(DynamicsManager):
+    def evolve(self, state: DensityMatrix, time: float):
+        total_time = 0
+
+        self.H = 0
+        for dynamic in self.dynamic_funcs:
+            self.H += dynamic.hamiltonian
+
+        while total_time < time:
+            state = rungeKutta(self.computeDerivative, self.timestep, state)
+            total_time += self.timestep
+        return state
+
+    def computeDerivative(self, state):
+        return -1j * self.H.commutator(state)
+

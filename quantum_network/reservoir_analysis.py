@@ -1,7 +1,8 @@
-from .model import Model
 from multiprocessing import pool
+from quantum_model.system import SingleSystem, CompositeSystem
+from quantum_model.dynamics import QuditEnergyDynamics, QuditExchangeDynamics, QutritQubitExchangeDynamics
 
-from quantum.core import GeneralQubitMatrixGen
+from quantum.core import GeneralQubitMatrixGen, sigmaZ, sigmaX, sigmaY, DensityMatrix, Operator
 
 from sklearn.neural_network import MLPRegressor
 from sklearn.model_selection import train_test_split
@@ -37,7 +38,10 @@ class ReservoirAnalyser:
                 n_qubits=n_qubits, degree=n_qubits - 1
             )
         elif state_subset == "thermal":
-            return self.state_gen.generateThermalState(T = np.random.rand()*256)
+            beta = (np.random.rand() *6)
+            state = self.state_gen.generateThermalState(beta= beta, dim=n_qubits)
+            state.beta = beta
+            return state
 
     def generateStates(self, nstates, n_qubits=1, state_subset="general"):
         self.states = [
@@ -45,24 +49,41 @@ class ReservoirAnalyser:
         ]
 
     def transformStates(self, multiprocess=False):
-        for i, reservoir in enumerate(self.reservoirs):
+        for i, model in enumerate(self.reservoirs):
             print(f"Transforming reservoir {i+1} of {len(self.reservoirs)}")
-
+            target = model.getSubsystem('Target')
+            reservoir = model.getSubsystem('Reservoir')
             if multiprocess:
                 with pool.Pool() as p:
                     d_train = p.map(
-                        reservoir.transform, tqdm.tqdm(self.states), chunksize=100
+                        reservoir.evolve, tqdm.tqdm(self.states), chunksize=100
                     )
             else:
+                d_train = []
+                for state in tqdm.tqdm(self.states):
+                    model.state = None
+                    for system in reservoir.subsystems:
+                        system.state = DensityMatrix(0)
 
-                d_train = [
-                    reservoir.transform(state) for state in tqdm.tqdm(self.states)
-                ]
+                    target.state = state
+                    model.computeState()
+                    model.evolve()
 
-            dataset = ReservoirAnalysisDataset(self.states, d_train, reservoir)
-            dataset.train()
-            dataset.dump()
+                    #d_train_row = []
+                    #measures = [Operator(np.eye(2)), sigmaX, sigmaY, sigmaZ(2)]
+                    #for j in range(4):
+                    #    for k in range(4):
+                    #        for l in range(4):
+                    #            d_train_row.append(model.measureSubsystem(reservoir, measures[i].tensor(measures[j]).tensor(measures[k])))
+                    #d_train.append(d_train_row)
+                    d_train.append([model.measureSubsystem(system, sigmaZ(system.dim)) for system in reservoir.subsystems])
+                    
+
+            dataset = ReservoirAnalysisDataset(self.states, d_train, model)
+            #dataset.train()
+            #dataset.dump()
             self.datasets.append(dataset)
+            return model
 
     def compare(self):
         fig = plt.figure(figsize=(14, 5 * len(self.datasets)))

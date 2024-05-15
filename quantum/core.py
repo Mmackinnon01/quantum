@@ -549,7 +549,7 @@ class GeneralQubitMatrixGen:
     def generateThermalState(self, T, dim=2, alpha=1, k_b=1):
         beta = 1/(T*k_b)
 
-        mat = np.zeros(shape=(dim,dim)).astype("complex")
+        mat = np.zeros(shape=(dim,dim)).astype("complex128")
         norm_fac = 0
         for i in range(dim):
             mat[i][i] = math.exp(-beta*alpha*(1 - (2*i)/(dim-1)))

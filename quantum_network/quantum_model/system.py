@@ -1,7 +1,9 @@
 from quantum.core import DensityMatrix
-from quantum_model.dynamics_manager import NumericalDynamicsManager
+from quantum_model.dynamics_manager import NumericalDynamicsManager, AnalyticDynamicsManager
 
+import math
 import numpy as np
+import tqdm
 
 
 class System:
@@ -9,7 +11,7 @@ class System:
     def __init__(self):
         self.dynamics = []
         self.name = None
-        self.dynamics_manager = NumericalDynamicsManager(0.01)
+        self.dynamics_manager = AnalyticDynamicsManager(0.001)
 
     @property
     def state(self):
@@ -50,6 +52,12 @@ class SingleSystem(System):
             self.__dim = ro.dim
         self.__state = ro
 
+    def computeState(self):
+        return self.state
+
+    def getSubsystem(self, name:str):
+        return None
+
     @property
     def dim(self):
         return self.__dim
@@ -86,7 +94,7 @@ class CompositeSystem(System):
 
     @property
     def dim(self):
-        return self.__dim
+        return math.prod([system.dim for system in self.subsystems])
 
     @property
     def state(self):
@@ -97,6 +105,14 @@ class CompositeSystem(System):
         for system in self.subsystems:
             system.state = None
         self.__state = ro
+
+    def computeState(self):
+        states = [system.computeState() for system in self.subsystems]
+        state = states[0]
+        for s in states[1:]:
+            state = state.tensor(s)
+        self.state = state
+        return self.state
 
     def subsystemIndex(self, target_system: System):
         subsystem_index = 0
@@ -128,7 +144,6 @@ class CompositeSystem(System):
         self.subsystems.append(system)
         self.state = self.state.tensor(system.state)
         self.nsystems += system.nsystems
-        self.updateDyanamics()
 
     def removeSubsystem(self, system: System):
         if self.subsystemIndex(system) is None:
@@ -152,10 +167,9 @@ class CompositeSystem(System):
             config2.pop(index)
 
         self.nsystems -= system.nsystems
-        self.updateDyanamics()
 
     def getDynamics(self):
-        dynamics = self.dynamics
+        dynamics = [d for d in self.dynamics]
 
         for system in self.subsystems:
             dynamics += system.getDynamics()
@@ -164,7 +178,7 @@ class CompositeSystem(System):
 
     def updateDyanamics(self):
         self.dynamics_manager.dynamic_funcs = []
-        for dynamicFunc in self.getDynamics():
+        for dynamicFunc in tqdm.tqdm(self.getDynamics()):
             systems = dynamicFunc.systems
             indices = []
             for system in systems:
@@ -182,14 +196,13 @@ class CompositeSystem(System):
 
         return config, dims
 
-    def evolve(self, t):
-        self.state = self.dynamics_manager.evolve(self.state, t)
+    def evolve(self):
+        self.state = self.dynamics_manager.evolve(self.state)
 
     def getSubsystemState(self, subsystem):
         system_indices = self.subsystemIndex(subsystem)
         subsystem_state = self.state
         config = self.configuration
-
         for i in reversed(range(self.nsystems)):
             if i not in system_indices:
                 subsystem_state = subsystem_state.partialTrace(i, config)
