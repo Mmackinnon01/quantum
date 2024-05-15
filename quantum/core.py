@@ -5,6 +5,7 @@ import itertools
 import typing
 
 from quantum.unitary import randomUnitary
+import scipy.linalg
 
 zero_mat = np.array([[1, 0], [0, 0]])
 one_mat = np.array([[0, 0], [0, 1]])
@@ -119,23 +120,31 @@ class Matrix:
             matrix = np.kron(matrix, np.eye(dim))
         return matrix
 
-    def reorder_list(self, list, config):
-        new_list = []
-        for i in config:
-            new_list.append(list[i])
+    def reorder_list_to(self, list, config):
+        '''config = [x,y,z] what is in position 1 should go to position x'''
+        new_list = [0 for i in range(len(config))]
+        for i, j in enumerate(config):
+            new_list[j] = list[i]
+        return new_list
+    
+    def reorder_list_from(self, list, config):
+        '''config = [x,y,z] what is in position 1 should come from position x'''
+        new_list = [0 for i in range(len(config))]
+        for i, j in enumerate(config):
+            new_list[i] = list[j]
         return new_list
 
     def rewrite_matrix(self, matrix, config, dims):
         new_matrix = np.zeros(matrix.shape).astype("complex")
-        new_dims = self.reorder_list(dims, config)
+        old_dims = self.reorder_list_to(dims, config)
         for i in range(matrix.shape[0]):
             for j in range(matrix.shape[1]):
-                i_config = self.index_to_config(i, dims)
-                j_config = self.index_to_config(j, dims)
-                new_i_config = self.reorder_list(i_config, config)
-                new_j_config = self.reorder_list(j_config, config)
-                new_i = self.config_to_index(new_i_config, new_dims)
-                new_j = self.config_to_index(new_j_config, new_dims)
+                i_config = self.index_to_config(i, old_dims)
+                j_config = self.index_to_config(j, old_dims)
+                new_i_config = self.reorder_list_from(i_config, config)
+                new_j_config = self.reorder_list_from(j_config, config)
+                new_i = self.config_to_index(new_i_config, dims)
+                new_j = self.config_to_index(new_j_config, dims)
                 new_matrix[new_i][new_j] = matrix[i][j]
         return new_matrix
 
@@ -149,7 +158,7 @@ class Matrix:
             else:
                 num_old -= 1
         self.transformed_matrix = self.rewrite_matrix(
-            matrix, config, self.reorder_list(dims, config)
+            matrix, config, dims
         )
 
     def reset(self):
@@ -199,6 +208,14 @@ class DensityMatrix(Matrix):
             np.round(self.hermConj().matrix, 5) == np.round(self.matrix, 5)
         ).all()
         return is_normalised and is_semi_positive and is_hermitian
+
+    def legitamacy(self):
+        is_normalised = round(self.trace(), 5) == 1
+        is_semi_positive = min(self.eigenvalues().eigenvalues) >= -0.00001
+        is_hermitian = (
+            np.round(self.hermConj().matrix, 5) == np.round(self.matrix, 5)
+        ).all()
+        print(f'Normalised: {is_normalised}, Semi-Pos: {is_semi_positive}, Hermitian: {is_hermitian}')
 
     def partialTranspose(self, system):
         ppt_state = np.zeros(self.matrix.shape).astype("complex")
@@ -546,16 +563,17 @@ class GeneralQubitMatrixGen:
         )
         return state / 4
     
-    def generateThermalState(self, T, dim=2, alpha=1, k_b=1):
-        beta = 1/(T*k_b)
+    def generateThermalState(self, beta, dim=2, alpha=1, k_b=1):
 
-        mat = np.zeros(shape=(dim,dim)).astype("complex128")
+        mat = np.zeros(shape=(dim,dim)).astype("complex")
         norm_fac = 0
         for i in range(dim):
-            mat[i][i] = math.exp(-beta*alpha*(1 - (2*i)/(dim-1)))
-            norm_fac += mat[i][i]
+            mat[i][i] = (1 - (2*i)/(dim-1))
+        ro = scipy.linalg.expm(-beta * alpha * mat)
+        ro = DensityMatrix(ro)
+        ro = ro.normalise()
 
-        return DensityMatrix(mat/norm_fac)
+        return ro
 
 
 class QuantumChannelGenerator:
@@ -585,10 +603,15 @@ class QuantumChannelGenerator:
         H_inv = Operator(scipy.linalg.sqrtm(np.linalg.inv(H.matrix)))
         return [mat * H_inv for mat in ginibre_mats]
 
+def sigmaZ(dim=2):
+    mat = np.zeros(shape=(dim,dim)).astype("complex")
+    for i in range(dim):
+        mat[i][i] = (1 - (2*i)/(dim-1))
+    
+    return Operator(mat)
 
 sigmaX = Operator(np.array([[0, 1], [1, 0]]))
 sigmaY = Operator(np.array([[0, -1j], [1j, 0]]))
-sigmaZ = Operator(np.array([[1, 0], [0, -1]]))
 lambda1 = Operator(np.array([[0, 1, 0], [1, 0, 0], [0, 0, 0]]))
 lambda2 = Operator(np.array([[0, -1j, 0], [1j, 0, 0], [0, 0, 0]]))
 lambda6 = Operator(np.array([[0, 0, 0], [0, 0, 1], [0, 1, 0]]))
