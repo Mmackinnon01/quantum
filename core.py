@@ -2,7 +2,7 @@ import numpy as np
 import scipy
 import math
 import itertools
-import typing
+import copy
 
 from quantum.unitary import randomUnitary
 import scipy.linalg
@@ -121,14 +121,14 @@ class Matrix:
         return matrix
 
     def reorder_list_to(self, list, config):
-        '''config = [x,y,z] what is in position 1 should go to position x'''
+        """config = [x,y,z] what is in position 1 should go to position x"""
         new_list = [0 for i in range(len(config))]
         for i, j in enumerate(config):
             new_list[j] = list[i]
         return new_list
-    
+
     def reorder_list_from(self, list, config):
-        '''config = [x,y,z] what is in position 1 should come from position x'''
+        """config = [x,y,z] what is in position 1 should come from position x"""
         new_list = [0 for i in range(len(config))]
         for i, j in enumerate(config):
             new_list[i] = list[j]
@@ -157,9 +157,7 @@ class Matrix:
                 config[i] = i + num_old
             else:
                 num_old -= 1
-        self.transformed_matrix = self.rewrite_matrix(
-            matrix, config, dims
-        )
+        self.transformed_matrix = self.rewrite_matrix(matrix, config, dims)
 
     def reset(self):
         self.transformed_matrix = None
@@ -181,8 +179,9 @@ class Operator(Matrix):
 
 class DensityMatrix(Matrix):
 
-    def __init__(self, matrix=None):
+    def __init__(self, matrix=None, configuration=None):
         super().__init__(matrix)
+        self.configuration = configuration
 
     def __mul__(self, val):
         if type(val) == Operator or type(val) == DensityMatrix:
@@ -197,6 +196,18 @@ class DensityMatrix(Matrix):
     @matrix.setter
     def matrix(self, matrix: np.array):
         self.__matrix = matrix
+
+    @property
+    def configuration(self):
+        return self.__configuration
+
+    @configuration.setter
+    def configuration(self, config):
+        if config is None:
+            self.n_systems = None
+        else:
+            self.n_systems = len(config)
+        self.__configuration = config
 
     def returnNew(self, matrix):
         return DensityMatrix(matrix)
@@ -215,7 +226,9 @@ class DensityMatrix(Matrix):
         is_hermitian = (
             np.round(self.hermConj().matrix, 5) == np.round(self.matrix, 5)
         ).all()
-        print(f'Normalised: {is_normalised}, Semi-Pos: {is_semi_positive}, Hermitian: {is_hermitian}')
+        print(
+            f"Normalised: {is_normalised}, Semi-Pos: {is_semi_positive}, Hermitian: {is_hermitian}"
+        )
 
     def partialTranspose(self, system):
         ppt_state = np.zeros(self.matrix.shape).astype("complex")
@@ -224,12 +237,12 @@ class DensityMatrix(Matrix):
         num_minor_chunks = 2
 
         for i in range(self.n_systems - system - 1):
-            minor_chunk_size *= 2
+            minor_chunk_size *= self.configuration[-i - 1]
 
         major_chunk_size = minor_chunk_size * num_minor_chunks
 
         for i in range(system):
-            num_major_chunks *= 2
+            num_major_chunks *= self.configuration[i]
 
         for major_i in range(num_major_chunks):
             for major_j in range(num_major_chunks):
@@ -287,7 +300,7 @@ class DensityMatrix(Matrix):
         return DensityMatrix(ppt_state)
 
     def negativity(self, degree=-1):
-        if degree == self.n_systems or degree == -1:
+        if degree == len(self.configuration) or degree == -1:
             return self.averageBipartitionNegativity()
         else:
             return self.subsystemNegativity(degree)
@@ -332,8 +345,8 @@ class DensityMatrix(Matrix):
         state = self
         for system in systems:
             state = state.partialTranspose(system)
-
-        return max([0, np.real(min(np.linalg.eigvals(state.matrix))) * -2])
+        eigs = np.real(np.linalg.eigvals(state.matrix))
+        return sum(np.abs(eigs) - eigs) / 2
 
     def averageBipartitionNegativity(self):
         negativities = self.negativityComponents()
@@ -350,25 +363,28 @@ class DensityMatrix(Matrix):
 
         return negativities
 
-    def partialTrace(self, trace_system, configuration):
-        trace_basis = self.generateSubsystemBasis(trace_system, configuration)
+    def partialTrace(self, trace_system):
+        trace_basis = self.generateSubsystemBasis(trace_system)
         sub_state = sum(vector.hermConj() * self * vector for vector in trace_basis)
+        config = copy.deepcopy(self.configuration)
+        config.pop(trace_system)
+        sub_state.configuration = config
         return sub_state
 
-    def generateSubsystemBasis(self, trace_system, configuration):
+    def generateSubsystemBasis(self, trace_system):
         basis = []
-        basis_dim = configuration[trace_system]
+        basis_dim = self.configuration[trace_system]
         for i in range(basis_dim):
             basis_vector = np.zeros(basis_dim)
             basis_vector[i] = 1
             basis_vector = Operator(basis_vector)
             if trace_system > 0:
                 basis_vector = Operator(
-                    np.eye(math.prod(configuration[:trace_system]))
+                    np.eye(math.prod(self.configuration[:trace_system]))
                 ).tensor(basis_vector)
-            if trace_system < len(configuration) - 1:
+            if trace_system < len(self.configuration) - 1:
                 basis_vector = basis_vector.tensor(
-                    Operator(np.eye(math.prod(configuration[trace_system+1:])))
+                    Operator(np.eye(math.prod(self.configuration[trace_system + 1 :])))
                 )
 
             basis.append(basis_vector.hermConj())
@@ -506,18 +522,23 @@ class GeneralQubitMatrixGen:
         separable_state = self.generateSeparableState(n_qubits)
         unitary = DensityMatrix(randomUnitary(2**n_qubits))
         general_state = unitary * separable_state * unitary.hermConj()
+        general_state.configuration = [2 for i in range(n_qubits)]
         return general_state
 
     def generatePartiallyEntangledState(self, n_qubits, degree):
         if degree > 0:
             entangled_partition = self.generateState(degree)
             if n_qubits == degree:
+                entangled_partition.configuration = [2 for i in range(n_qubits)]
                 return entangled_partition
         if n_qubits > degree:
             separable_partition = self.generateSeparableState(n_qubits - degree)
             if degree == 0:
+                separable_partition.configuration = [2 for i in range(n_qubits)]
                 return separable_partition
-        return entangled_partition.tensor(separable_partition)
+        state = entangled_partition.tensor(separable_partition)
+        state.configuration = [2 for i in range(n_qubits)]
+        return state
 
     def generateMixedState(self, n_qubits=1):
         T = DensityMatrix(
@@ -526,7 +547,7 @@ class GeneralQubitMatrixGen:
         )
 
         density_matrix = (T * T.hermConj()).normalise()
-
+        density_matrix.configuration = [2 for i in range(n_qubits)]
         return density_matrix
 
     def generateSeparableState(self, n_qubits=4):
@@ -537,6 +558,7 @@ class GeneralQubitMatrixGen:
                 state = new_state
             else:
                 state = state.tensor(new_state)
+        state.configuration = [2 for i in range(n_qubits)]
         return state
 
     def generatePureState(self, n_qubits=1):
@@ -544,6 +566,7 @@ class GeneralQubitMatrixGen:
             size=(2**n_qubits,)
         )
         state = DensityMatrix(np.outer(state, np.conj(state.T)))
+        state.configuration = [2 for i in range(n_qubits)]
         return state.normalise()
 
     def generateWernerState(self, c=None):
@@ -552,6 +575,7 @@ class GeneralQubitMatrixGen:
         state = np.eye(4, 4) * (1 - c) / 4 + c * np.array(
             [[0, 0, 0, 0], [0, 0.5, 0.5, 0], [0, 0.5, 0.5, 0], [0, 0, 0, 0]]
         )
+        state.configuration = [2, 2]
         return DensityMatrix(state)
 
     def generatePDState(self, c1, c2, c3):
@@ -561,14 +585,15 @@ class GeneralQubitMatrixGen:
             + c2 * sigmaY.tensor(sigmaY)
             + c3 * sigmaZ.tensor(sigmaZ)
         )
+        state.configuration = [2, 2]
         return state / 4
-    
+
     def generateThermalState(self, beta, dim=2, alpha=1, k_b=1):
 
-        mat = np.zeros(shape=(dim,dim)).astype("complex")
+        mat = np.zeros(shape=(dim, dim)).astype("complex")
         norm_fac = 0
         for i in range(dim):
-            mat[i][i] = (1 - (2*i)/(dim-1))
+            mat[i][i] = 1 - (2 * i) / (dim - 1)
         ro = scipy.linalg.expm(-beta * alpha * mat)
         ro = DensityMatrix(ro)
         ro = ro.normalise()
@@ -603,12 +628,14 @@ class QuantumChannelGenerator:
         H_inv = Operator(scipy.linalg.sqrtm(np.linalg.inv(H.matrix)))
         return [mat * H_inv for mat in ginibre_mats]
 
+
 def sigmaZ(dim=2):
-    mat = np.zeros(shape=(dim,dim)).astype("complex")
+    mat = np.zeros(shape=(dim, dim)).astype("complex")
     for i in range(dim):
-        mat[i][i] = (1 - (2*i)/(dim-1))
-    
+        mat[i][i] = 1 - (2 * i) / (dim - 1)
+
     return Operator(mat)
+
 
 sigmaX = Operator(np.array([[0, 1], [1, 0]]))
 sigmaY = Operator(np.array([[0, -1j], [1j, 0]]))
