@@ -165,6 +165,11 @@ class Matrix:
 
 class Operator(Matrix):
 
+    def __init__(self, matrix=None):
+        super().__init__(matrix)
+        self.__eigenvals = None
+        self.__eigenbasis = None
+
     def __mul__(self, val):
         if type(val) == DensityMatrix:
             return DensityMatrix(np.matmul(self.matrix, val.matrix))
@@ -172,6 +177,21 @@ class Operator(Matrix):
             return Operator(np.matmul(self.matrix, val.matrix))
         else:
             return Operator(self.matrix * val)
+
+    @property
+    def eigenbasis(self):
+        if self.__eigenbasis is None:
+            self.__eigenbasis = [
+                Operator(np.outer(eigenvector, eigenvector.T))
+                for eigenvector in self.eigenvalues().eigenvectors.T
+            ]
+        return self.__eigenbasis
+
+    @property
+    def eigenvals(self):
+        if self.__eigenvals is None:
+            self.__eigenvals = self.eigenvalues().eigenvalues
+        return self.__eigenvals
 
     def returnNew(self, matrix):
         return Operator(matrix)
@@ -409,8 +429,27 @@ class DensityMatrix(Matrix):
                 vn -= val * math.log(np.real(val))
         return np.real(vn)
 
-    def measure(self, operator):
-        return np.real((self * operator).trace())
+    def measure(self, operator, shots=-1):
+        if shots == -1:
+            return np.real((operator * self).trace())
+        else:
+            probs = [self.measure(projection) for projection in operator.eigenbasis]
+            eigenvalues = operator.eigenvals
+            return self.finiteStatistics(shots, probs, eigenvalues)
+
+    def finiteStatistics(self, shots, probabilities, values):
+        if not np.isclose(sum(probabilities), 1):
+            raise ValueError("The probabilities must sum to 1.")
+
+        return (
+            np.sum(
+                [
+                    values[i] * val
+                    for i, val in enumerate(np.random.multinomial(shots, probabilities))
+                ]
+            )
+            / shots
+        )
 
     def normalise(self):
         return self / self.trace()
@@ -635,6 +674,12 @@ def sigmaZ(dim=2):
         mat[i][i] = 1 - (2 * i) / (dim - 1)
 
     return Operator(mat)
+
+
+def compBasis(dim=2, element=0):
+    op = np.zeros((dim, dim))
+    op[element][element] = 1
+    return Operator(op)
 
 
 sigmaX = Operator(np.array([[0, 1], [1, 0]]))
