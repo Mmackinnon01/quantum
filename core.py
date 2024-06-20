@@ -66,6 +66,9 @@ class Matrix:
     def trace(self):
         return np.trace(self.matrix)
 
+    def normalise(self):
+        return self / self.trace()
+
     def copy(self):
         return self.returnNew(self.matrix)
 
@@ -451,9 +454,6 @@ class DensityMatrix(Matrix):
             / shots
         )
 
-    def normalise(self):
-        return self / self.trace()
-
     def linearMap(self, operators: list[Operator]):
 
         if type(operators) != list:
@@ -616,6 +616,33 @@ class GeneralQubitMatrixGen:
         )
         state.configuration = [2, 2]
         return DensityMatrix(state)
+
+    def generateWState(self, p1, p2, p3):
+        c1 = p1**0.5
+        c2 = p2**0.5
+        c3 = p3**0.5
+
+    def generateGHZState(self, p1=0.5):
+        p2 = 1 - p1
+        c1 = p1**0.5
+        c2 = p2**0.5
+
+        state = DensityMatrix(
+            np.array(
+                [
+                    [c1**2, 0, 0, 0, 0, 0, 0, c1 * c2],
+                    [0, 0, 0, 0, 0, 0, 0, 0],
+                    [0, 0, 0, 0, 0, 0, 0, 0],
+                    [0, 0, 0, 0, 0, 0, 0, 0],
+                    [0, 0, 0, 0, 0, 0, 0, 0],
+                    [0, 0, 0, 0, 0, 0, 0, 0],
+                    [0, 0, 0, 0, 0, 0, 0, 0],
+                    [c1 * c2, 0, 0, 0, 0, 0, 0, c2**2],
+                ]
+            )
+        )
+        state.configuration = [2, 2, 2]
+        return state
 
     def generatePDState(self, c1, c2, c3):
         state = (
