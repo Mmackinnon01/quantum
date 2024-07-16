@@ -185,7 +185,7 @@ class Operator(Matrix):
     def eigenbasis(self):
         if self.__eigenbasis is None:
             self.__eigenbasis = [
-                Operator(np.outer(eigenvector, eigenvector.T))
+                Operator(np.outer(eigenvector, np.conjugate(eigenvector.T)))
                 for eigenvector in self.eigenvalues().eigenvectors.T
             ]
         return self.__eigenbasis
@@ -242,6 +242,9 @@ class DensityMatrix(Matrix):
             np.round(self.hermConj().matrix, 5) == np.round(self.matrix, 5)
         ).all()
         return is_normalised and is_semi_positive and is_hermitian
+
+    def mixedness(self):
+        return np.real((self * self).trace())
 
     def legitamacy(self):
         is_normalised = round(self.trace(), 5) == 1
@@ -444,7 +447,7 @@ class DensityMatrix(Matrix):
         if not np.isclose(sum(probabilities), 1):
             raise ValueError("The probabilities must sum to 1.")
 
-        return (
+        return np.real(
             np.sum(
                 [
                     values[i] * val
@@ -621,6 +624,12 @@ class GeneralQubitMatrixGen:
         c1 = p1**0.5
         c2 = p2**0.5
         c3 = p3**0.5
+
+        state = np.array([[0], [c1], [c2], [0], [c3], [0], [0], [0]])
+        state = DensityMatrix(np.outer(state, np.conjugate(state.T)))
+        state.configuration = [2,2,2]
+
+        return state
 
     def generateGHZState(self, p1=0.5):
         p2 = 1 - p1
