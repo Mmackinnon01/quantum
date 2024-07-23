@@ -474,6 +474,18 @@ class DensityMatrix(Matrix):
     def buresDistance(self, state):
         return 2 * (1 - self.uhlmannFidelity(state))
 
+    def concurrence(self):
+        if self.matrix.shape[0] != 4:
+            raise ValueError("Can't compute concurrency for non-2 qubit state")
+
+        spin_flip = sigmaY.tensor(sigmaY)
+        rho_tilda = spin_flip * DensityMatrix(np.conjugate(self.matrix)) * spin_flip
+        rho_sqrt = scipy.linalg.sqrtm(self.matrix)
+        R = DensityMatrix(scipy.linalg.sqrtm(rho_sqrt @ rho_tilda.matrix @ rho_sqrt))
+        eigs = R.eigenvalues().eigenvalues
+        concurrence = max([0, eigs[0] - eigs[1] - eigs[2] - eigs[3]])
+        return np.real(concurrence)
+
 
 class QuantumChannel:
 
@@ -627,7 +639,7 @@ class GeneralQubitMatrixGen:
 
         state = np.array([[0], [c1], [c2], [0], [c3], [0], [0], [0]])
         state = DensityMatrix(np.outer(state, np.conjugate(state.T)))
-        state.configuration = [2,2,2]
+        state.configuration = [2, 2, 2]
 
         return state
 
