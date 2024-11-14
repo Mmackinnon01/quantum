@@ -3,12 +3,15 @@ import scipy
 import math
 import itertools
 import copy
+import random
 
 from quantum.unitary import randomUnitary
 import scipy.linalg
 
 zero_mat = np.array([[1, 0], [0, 0]])
 one_mat = np.array([[0, 0], [0, 1]])
+down_vec = np.array([[1],[0]])
+up_vec = np.array([[0],[1]])
 
 
 class Matrix:
@@ -58,6 +61,9 @@ class Matrix:
     @matrix.setter
     def matrix(self, matrix: np.array):
         self.__matrix = matrix
+
+    def getOriginalMatrix(self):
+        return self.__matrix
 
     @property
     def dim(self):
@@ -175,7 +181,7 @@ class Operator(Matrix):
 
     def __mul__(self, val):
         if type(val) == DensityMatrix:
-            return DensityMatrix(np.matmul(self.matrix, val.matrix))
+            return DensityMatrix(np.matmul(self.matrix, val.matrix), val.configuration)
         elif type(val) == Operator:
             return Operator(np.matmul(self.matrix, val.matrix))
         else:
@@ -204,13 +210,22 @@ class DensityMatrix(Matrix):
 
     def __init__(self, matrix=None, configuration=None):
         super().__init__(matrix)
-        self.configuration = configuration
+        if configuration is None:
+            self.configuration = [self.matrix.shape[0]]
+        else:
+            self.configuration = configuration
 
     def __mul__(self, val):
         if type(val) == Operator or type(val) == DensityMatrix:
-            return DensityMatrix(np.matmul(self.matrix, val.matrix))
+            return DensityMatrix(np.matmul(self.matrix, val.matrix), self.configuration)
         else:
-            return DensityMatrix(self.matrix * val)
+            return DensityMatrix(self.matrix * val, self.configuration)
+        
+    def __rmul__(self, val):
+        if type(val) == Operator or type(val) == DensityMatrix:
+            return DensityMatrix(np.matmul(val.matrix, self.matrix), self.configuration)
+        else:
+            return DensityMatrix(self.matrix * val, self.configuration)
 
     @property
     def matrix(self):
@@ -232,8 +247,40 @@ class DensityMatrix(Matrix):
             self.n_systems = len(config)
         self.__configuration = config
 
-    def returnNew(self, matrix):
-        return DensityMatrix(matrix)
+    def __add__(self, val):
+        state = super().__add__(val)
+        state.configuration = self.configuration
+        return state
+    
+    def __radd__(self, val):
+        state = super().__radd__(val)
+        state.configuration = self.configuration
+        return state
+    
+    def __sub__(self, val):
+        state = super().__sub__(val)
+        state.configuration = self.configuration
+        return state
+    
+    def __truediv__(self, val):
+        state = super().__truediv__(val)
+        state.configuration = self.configuration
+        return state
+
+    def tensor(self, matrices):
+        state = super().tensor(matrices)
+        config = copy.deepcopy(self.configuration)
+
+        if type(matrices) == list:
+            for mat in matrices:
+                config += mat.configuration
+        else:
+            config += matrices.configuration
+        state.configuration = config
+        return state
+
+    def returnNew(self, matrix, configuration=None):
+        return DensityMatrix(matrix, configuration)
 
     def isLegitamate(self) -> bool:
         is_normalised = round(self.trace(), 5) == 1
@@ -323,7 +370,7 @@ class DensityMatrix(Matrix):
                                 + (minor_i + 1) * minor_chunk_size,
                             ]
 
-        return DensityMatrix(ppt_state)
+        return DensityMatrix(ppt_state, self.configuration)
 
     def negativity(self, degree=-1):
         if degree == len(self.configuration) or degree == -1:
@@ -372,7 +419,7 @@ class DensityMatrix(Matrix):
         for system in systems:
             state = state.partialTranspose(system)
         eigs = np.real(np.linalg.eigvals(state.matrix))
-        return sum(np.abs(eigs) - eigs) / 2
+        return sum(np.abs(eigs) - eigs)
 
     def averageBipartitionNegativity(self):
         negativities = self.negativityComponents()
@@ -382,8 +429,8 @@ class DensityMatrix(Matrix):
     def subsystemNegativity(self, degree):
         negativities = []
         for system in range(self.n_systems):
-            if self.bipartitionNegativity([system]) > 10e-7:
-                negativities.append(None)
+            if self.bipartitionNegativity([system]) > 10e-5:
+                negativities.append(0)
             else:
                 negativities.append(self.partialTrace(system).negativity(degree))
 
@@ -579,7 +626,7 @@ class GeneralQubitMatrixGen:
         general_state.configuration = [2 for i in range(n_qubits)]
         return general_state
 
-    def generatePartiallyEntangledState(self, n_qubits, degree):
+    def generatePartiallyEntangledState(self, n_qubits, degree, shuffle=True):
         if degree > 0:
             entangled_partition = self.generateState(degree)
             if n_qubits == degree:
@@ -592,14 +639,44 @@ class GeneralQubitMatrixGen:
                 return separable_partition
         state = entangled_partition.tensor(separable_partition)
         state.configuration = [2 for i in range(n_qubits)]
-        return state
+        if shuffle:
+            shuffled_state = DensityMatrix(state.rewrite_matrix(state.matrix, random.sample([0,1,2], 3),[2,2,2]))
+            shuffled_state.configuration = [2 for i in range(n_qubits)]
+            return shuffled_state
+        else:
+            return state
+    
+    def random_projection(self):
+        theta = np.random.rand() * np.pi
+        phi = np.random.rand() * 2 * np.pi
+        a = np.cos(theta)
+        b = np.exp(1j*phi) * np.sin(theta)
+        vec = a * Operator(down_vec) + b * Operator(up_vec)
+        return Operator(vec.tensor(vec.hermConj()).matrix)
+
+    def generatePartiallyEntangledState2(self, n_qubits, degree, shuffle=False):
+        state = self.generateState(n_qubits)
+        projections = [self.random_projection() for i in range(n_qubits - degree)]
+
+        for i, projector in enumerate(projections):
+
+            full_projection = projector.tensor(Operator(np.eye(2**(n_qubits - 1 - i))))
+            state = (full_projection * state * full_projection).partialTrace(0).normalise()
+        projections = [DensityMatrix(projector.matrix, [2]) for projector in projections]
+
+        state = projections[0].tensor(projections[1:] + [state])
+        if shuffle:
+            shuffled_state = DensityMatrix(state.rewrite_matrix(state.matrix, random.sample([0,1,2], 3),[2,2,2]))
+            shuffled_state.configuration = [2 for i in range(n_qubits)]
+            return shuffled_state
+        else:
+            return state
 
     def generateMixedState(self, n_qubits=1):
         T = DensityMatrix(
             np.random.normal(size=(2**n_qubits, 2**n_qubits))
             + 1j * np.random.normal(size=(2**n_qubits, 2**n_qubits))
         )
-
         density_matrix = (T * T.hermConj()).normalise()
         density_matrix.configuration = [2 for i in range(n_qubits)]
         return density_matrix
@@ -620,8 +697,9 @@ class GeneralQubitMatrixGen:
             size=(2**n_qubits,)
         )
         state = DensityMatrix(np.outer(state, np.conj(state.T)))
+        state = state.normalise()
         state.configuration = [2 for i in range(n_qubits)]
-        return state.normalise()
+        return state
 
     def generateWernerState(self, c=None):
         if c is None:
@@ -685,6 +763,13 @@ class GeneralQubitMatrixGen:
         ro = DensityMatrix(ro)
         ro = ro.normalise()
 
+        return ro
+    
+    def generateDualBipartiteEntangledState(self, a):
+        psi_plus = DensityMatrix(2**(-0.5) * np.array([[0,0,0,0],[0,1,1,0],[0,1,1,0],[0,0,0,0]]),[2,2])
+
+        ro = a * psi_plus.tensor(DensityMatrix(0)) + (1-a) * DensityMatrix(0).tensor(psi_plus)
+        ro.configuration = [2,2,2]
         return ro
 
 

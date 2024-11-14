@@ -29,7 +29,7 @@ def compositeRotationOperator(n, dimension):
             chi = 0
         rotations.append(rotationOperator(n-i, n, dimension, phi, psi, chi))
 
-    if len(rotations) > 1:                      
+    if len(rotations) > 1:
         compositeRotation = np.linalg.multi_dot(rotations)
     else:
         compositeRotation = rotations[0]
