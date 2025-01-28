@@ -51,6 +51,9 @@ class Matrix:
     def __truediv__(self, val):
         return self.returnNew(self.matrix / val)
 
+    def __eq__(self, val):
+        return np.allclose(self.matrix, val.matrix)
+
     @property
     def matrix(self):
         if self.transformed_matrix is not None:
@@ -83,6 +86,9 @@ class Matrix:
 
     def hermConj(self):
         return self.returnNew(np.conjugate(np.transpose(self.matrix)))
+
+    def T(self):
+        return self.returnNew(self.matrix.T)
 
     def eigenvalues(self):
         return np.linalg.eig(self.matrix)
